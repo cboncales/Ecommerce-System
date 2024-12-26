@@ -7,6 +7,10 @@ from django.contrib.auth.decorators import login_required,user_passes_test
 from django.contrib import messages
 from django.conf import settings
 
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .utils import decrypt_message
+
 def home_view(request):
     products=models.Product.objects.all()
     if 'product_ids' in request.COOKIES:
@@ -556,3 +560,17 @@ def contactus_view(request):
             send_mail(str(name)+' || '+str(email),message, settings.EMAIL_HOST_USER, settings.EMAIL_RECEIVING_USER, fail_silently = False)
             return render(request, 'ecom/contactussuccess.html')
     return render(request, 'ecom/contactus.html', {'form':sub})
+
+@api_view(['POST'])
+def receive_message(request):
+    """Receive and decrypt a message from the banking app."""
+    encrypted_message = request.data.get('message')
+    if not encrypted_message:
+        return Response({'error': 'Encrypted message is required'}, status=400)
+    
+    try:
+        decrypted_message = decrypt_message(encrypted_message)
+    except Exception:
+        return Response({'error': 'Invalid encryption'}, status=400)
+    
+    return Response({'decrypted_message': decrypted_message})
