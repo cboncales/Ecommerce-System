@@ -1,4 +1,5 @@
-from django.shortcuts import render,redirect,reverse
+from django.shortcuts import render,redirect
+from django.urls import reverse
 from . import forms,models
 from django.http import HttpResponseRedirect,HttpResponse
 from django.core.mail import send_mail
@@ -6,6 +7,9 @@ from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required,user_passes_test
 from django.contrib import messages
 from django.conf import settings
+
+from xhtml2pdf import pisa
+import io
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -79,8 +83,11 @@ def admin_dashboard_view(request):
     ordered_products=[]
     ordered_bys=[]
     for order in orders:
-        ordered_product=models.Product.objects.all().filter(id=order.product.id)
-        ordered_by=models.Customer.objects.all().filter(id = order.customer.id)
+        if order.product:
+            ordered_product=models.Product.objects.all().filter(id=order.product.id)
+        else:
+            ordered_product=[]
+        ordered_by=models.Customer.objects.all().filter(id=order.customer.id) if order.customer else []
         ordered_products.append(ordered_product)
         ordered_bys.append(ordered_by)
 
@@ -103,7 +110,7 @@ def view_customer_view(request):
 @login_required(login_url='adminlogin')
 def delete_customer_view(request,pk):
     customer=models.Customer.objects.get(id=pk)
-    user=models.User.objects.get(id=customer.user_id)
+    user=customer.user
     user.delete()
     customer.delete()
     return redirect('view-customer')
@@ -112,7 +119,7 @@ def delete_customer_view(request,pk):
 @login_required(login_url='adminlogin')
 def update_customer_view(request,pk):
     customer=models.Customer.objects.get(id=pk)
-    user=models.User.objects.get(id=customer.user_id)
+    user=customer.user
     userForm=forms.CustomerUserForm(instance=user)
     customerForm=forms.CustomerForm(request.FILES,instance=customer)
     mydict={'userForm':userForm,'customerForm':customerForm}
@@ -171,8 +178,11 @@ def admin_view_booking_view(request):
     ordered_products=[]
     ordered_bys=[]
     for order in orders:
-        ordered_product=models.Product.objects.all().filter(id=order.product.id)
-        ordered_by=models.Customer.objects.all().filter(id = order.customer.id)
+        if order.product:
+            ordered_product=models.Product.objects.all().filter(id=order.product.id)
+        else:
+            ordered_product=[]
+        ordered_by=models.Customer.objects.all().filter(id=order.customer.id) if order.customer else []
         ordered_products.append(ordered_product)
         ordered_bys.append(ordered_by)
     return render(request,'ecom/admin_view_booking.html',{'data':zip(ordered_products,ordered_bys,orders)})
@@ -426,8 +436,9 @@ def payment_success_view(request):
     # here we are placing number of orders as much there is a products
     # suppose if we have 5 items in cart and we place order....so 5 rows will be created in orders table
     # there will be lot of redundant data in orders table...but its become more complicated if we normalize it
-    for product in products:
-        models.Orders.objects.get_or_create(customer=customer,product=product,status='Pending',email=email,mobile=mobile,address=address)
+    if products:
+        for product in products:
+            models.Orders.objects.get_or_create(customer=customer,product=product,status='Pending',email=email,mobile=mobile,address=address)
 
     # after order placed cookies should be deleted
     response = render(request,'ecom/payment_success.html')
@@ -448,7 +459,8 @@ def my_order_view(request):
     orders=models.Orders.objects.all().filter(customer_id = customer)
     ordered_products=[]
     for order in orders:
-        ordered_product=models.Product.objects.all().filter(id=order.product.id)
+        if order.product:
+            ordered_product=models.Product.objects.all().filter(id=order.product.id)
         ordered_products.append(ordered_product)
 
     return render(request,'ecom/my_order.html',{'data':zip(ordered_products,orders)})
@@ -481,12 +493,19 @@ from django.http import HttpResponse
 
 def render_to_pdf(template_src, context_dict):
     template = get_template(template_src)
-    html  = template.render(context_dict)
+    html = template.render(context_dict)
     result = io.BytesIO()
-    pdf = pisa.pisaDocument(io.BytesIO(html.encode("ISO-8859-1")), result)
-    if not pdf.err:
-        return HttpResponse(result.getvalue(), content_type='application/pdf')
-    return
+
+    # Generate the PDF
+    pdf_status = pisa.pisaDocument(io.BytesIO(html.encode("ISO-8859-1")), result)
+
+    # Check if PDF generation was successful
+    if pdf_status == 1:  # Return value `1` indicates an error.
+        return HttpResponse('We had some errors in creating the PDF', status=400)
+
+    # Return the generated PDF if no errors
+    return HttpResponse(result.getvalue(), content_type='application/pdf')
+
 
 @login_required(login_url='customerlogin')
 @user_passes_test(is_customer)
@@ -526,7 +545,7 @@ def my_profile_view(request):
 @user_passes_test(is_customer)
 def edit_profile_view(request):
     customer=models.Customer.objects.get(user_id=request.user.id)
-    user=models.User.objects.get(id=customer.user_id)
+    user=customer.user
     userForm=forms.CustomerUserForm(instance=user)
     customerForm=forms.CustomerForm(request.FILES,instance=customer)
     mydict={'userForm':userForm,'customerForm':customerForm}
